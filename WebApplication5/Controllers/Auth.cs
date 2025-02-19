@@ -1,64 +1,74 @@
 ﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
-using Azure;
-using Azure.Core;
-using Microsoft.AspNetCore.CookiePolicy;
-using Microsoft.AspNetCore.DataProtection;
-using Microsoft.AspNetCore.Http.Extensions;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
-using WebApplication5.Models;
 
 namespace WebApplication5.Controllers
 {
-    [Controller]
-    [Route("[controller]")]
-    public class Auth : Controller
+    [ApiController]
+    [Route("api/auth")]
+    public class AuthController : Controller
     {
-        public readonly IConfiguration _config;
-       
+        private readonly IConfiguration _config;
 
-        public Auth(IConfiguration config ) { 
-        _config = config;
-       
+        public AuthController(IConfiguration config)
+        {
+            _config = config;
         }
 
-        [HttpPost]
-        [Route("api/login")]
-        public IActionResult Login([FromBody] Login login)
+        [HttpPost("login")]
+        public IActionResult Login([FromBody] LoginRequest login)
         {
             try
             {
-              
                 if (login.Username != "admin" || login.Password != "1234567890")
                 {
-                    return BadRequest("Invalid User try next time !");
+                    return BadRequest("Invalid Username or Password!");
                 }
 
-
                 var token = GenerateJwtToken(login.Username);
-                Response.Cookies.Append("AccessToken", token);
-                var router= Request.GetDisplayUrl();
-                return Ok((RedirectToAction("redirect", "/dashboad")));
+
+                //👇👇 This line add token in cookies 
+                Response.Cookies.Append("AccessToken", token, new CookieOptions
+                {
+                    HttpOnly = true, // Prevents access from JavaScript  (document.cookie)
+                    Secure = true, // Ensures cookies are sent only over HTTPS
+                    SameSite = SameSiteMode.Strict // Prevents CSRF attacks
+                });
+
+                return Ok(new { Message = "User Login Successful" });
             }
             catch (Exception ex)
             {
                 return BadRequest(ex.Message);
             }
-
+        }
+        //[Authorize] only validates the token from the Authorization header, not from cookies. Authorization: Bearer <token> 
+        [Authorize]
+        [HttpGet("logout")]
+        public IActionResult Logout()
+        {
+            //ContainsKey is a method used to check if a specific key exists in a dictionary-like collection
+            if (Request.Cookies.ContainsKey("AccessToken"))
+            {
+                Response.Cookies.Delete("AccessToken");
+                return Ok("Logout Successfully");
+            }
+            return BadRequest("User is not logged in");
         }
 
-        private string GenerateJwtToken(string?  user)
+        private string GenerateJwtToken(string username)
         {
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]));
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
             var claims = new[]
             {
-            new Claim(JwtRegisteredClaimNames.Sub, user),
-            //new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
-        };
+                new Claim(JwtRegisteredClaimNames.Sub, username),
+                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+            };
 
             var token = new JwtSecurityToken(
                 issuer: _config["Jwt:Issuer"],
@@ -71,11 +81,14 @@ namespace WebApplication5.Controllers
             return new JwtSecurityTokenHandler().WriteToken(token);
         }
     }
+
+    public class LoginRequest
+    {
+        public string Username { get; set; }
+        public string Password { get; set; }
+    }
 }
-/*Response.Cookies.Append("AuthToken", token, new CookieOptions
-{
-    HttpOnly = true, // Prevents JavaScript access
-    Secure = true,   // Only send cookie over HTTPS
-    SameSite = SameSiteMode.Strict, // Protects against CSRF
-    Expires = DateTime.UtcNow.AddHours(1) // Token expiration
-});*/
+
+
+//verification Of Password
+//BCrypt.Net.BCrypt.Verify(login.Password, "1234567890");
